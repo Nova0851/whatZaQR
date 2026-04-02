@@ -3,7 +3,6 @@ const admin = require('firebase-admin');
 const express = require('express');
 const app = express();
 
-// 1. CARGAR FIREBASE
 const serviceAccount = require("./serviceAccountKey.json"); 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -16,32 +15,35 @@ const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process'],
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process'],
         executablePath: '/usr/bin/google-chrome-stable'
     }
 });
 
-// GENERAR QR AL INSTANTE
-client.on('qr', async (qr) => {
-    console.log('--- NUEVO QR RECIBIDO ---');
-    // Usamos un servicio de Google para generar la imagen más rápido
-    const qrImage = https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(qr)};
-    
+// FUNCIÓN PARA MANDAR EL QR A FIREBASE
+async function updateFirebaseQR(qrCode) {
+    console.log("Sincronizando QR con Firebase...");
+    const qrImage = https://api.qrserver.com/v1/create-qr-code/?size=264x264&data=${encodeURIComponent(qrCode)};
     await db.collection("whatsapp_sessions").doc("global_session").set({
         qrCode: qrImage,
         status: "esperando",
         lastUpdate: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
+}
+
+client.on('qr', (qr) => {
+    console.log("EVENTO: QR Recibido");
+    updateFirebaseQR(qr);
 });
 
 client.on('ready', () => {
-    console.log('SESIÓN ACTIVA');
+    console.log("ESTADO: Cliente Listo");
     db.collection("whatsapp_sessions").doc("global_session").update({ status: "exito" });
 });
 
 client.initialize();
 
-// Servidor para Render
+// Servidor de salud para Render
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('OK'));
-app.listen(port);
+app.get('/', (req, res) => res.send('MOTOR ACTIVO'));
+app.listen(port, () => console.log("Servidor escuchando en puerto " + port));
