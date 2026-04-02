@@ -23,18 +23,17 @@ const client = new Client({
             '--disable-dev-shm-usage',
             '--single-process'
         ],
-        // Render usa esta ruta para Chrome
+        // Ruta correcta para Render con el comando que pusimos en Settings
         executablePath: '/usr/bin/google-chrome-stable'
     }
 });
 
-// CUANDO SE GENERA EL QR
+// CUANDO SE GENERA EL QR (CORREGIDO CON COMILLAS)
 client.on('qr', async (qr) => {
     console.log('NUEVO QR GENERADO');
-    // Generamos una URL de imagen para el QR
+    // Usamos comillas invertidas para que reconozca ${}
     const qrImage = https://api.qrserver.com/v1/create-qr-code/?size=264x264&data=${encodeURIComponent(qr)};
     
-    // Lo subimos a Firebase a una ruta fija global
     await db.collection("whatsapp_sessions").doc("global_session").set({
         qrCode: qrImage,
         status: "esperando",
@@ -55,4 +54,4 @@ client.initialize();
 // SERVIDOR PARA RENDER
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('MOTOR WA ONLINE'));
-app.listen(port, () => console.log(Servidor en puerto ${port}));
+app.listen(port, () => console.log('Servidor en puerto ' + port));
