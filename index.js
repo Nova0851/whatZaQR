@@ -12,27 +12,20 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// CONFIGURACIÓN DEL CLIENTE WHATSAPP
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--single-process'
-        ],
-        // Ruta correcta para Render con el comando que pusimos en Settings
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process'],
         executablePath: '/usr/bin/google-chrome-stable'
     }
 });
 
-// CUANDO SE GENERA EL QR (CORREGIDO CON COMILLAS)
+// GENERAR QR AL INSTANTE
 client.on('qr', async (qr) => {
-    console.log('NUEVO QR GENERADO');
-    // Usamos comillas invertidas para que reconozca ${}
-    const qrImage = https://api.qrserver.com/v1/create-qr-code/?size=264x264&data=${encodeURIComponent(qr)};
+    console.log('--- NUEVO QR RECIBIDO ---');
+    // Usamos un servicio de Google para generar la imagen más rápido
+    const qrImage = https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(qr)};
     
     await db.collection("whatsapp_sessions").doc("global_session").set({
         qrCode: qrImage,
@@ -41,17 +34,14 @@ client.on('qr', async (qr) => {
     }, { merge: true });
 });
 
-// CUANDO SE INICIA SESIÓN
-client.on('ready', async () => {
-    console.log('¡CLIENTE LISTO!');
-    await db.collection("whatsapp_sessions").doc("global_session").update({
-        status: "exito"
-    });
+client.on('ready', () => {
+    console.log('SESIÓN ACTIVA');
+    db.collection("whatsapp_sessions").doc("global_session").update({ status: "exito" });
 });
 
 client.initialize();
 
-// SERVIDOR PARA RENDER
+// Servidor para Render
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('MOTOR WA ONLINE'));
-app.listen(port, () => console.log('Servidor en puerto ' + port));
+app.get('/', (req, res) => res.send('OK'));
+app.listen(port);
