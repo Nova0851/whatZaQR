@@ -16,7 +16,13 @@ const db = admin.firestore();
 async function startWA(adminUID) {
     const browser = await puppeteer.launch({
         headless: "new",
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] // Requerido para servidores gratuitos
+        // Quitamos 'executablePath' para que use el que descarga por defecto
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', // Añadido para evitar errores de memoria en Render
+            '--single-process'         // Añadido para que consuma menos recursos
+        ]
     });
     
     const page = await browser.newPage();
